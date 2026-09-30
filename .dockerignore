@@ -1,0 +1,9 @@
+.git
+.next
+node_modules
+apps/web/node_modules
+**/__pycache__
+**/.pytest_cache
+*.pyc
+compose-start.log
+compose-start.err

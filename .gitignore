@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.next/
+node_modules/
+coverage.xml
+.pytest_cache/
+dist/
+prometheus-data/
+grafana-data/
+compose-start.log
+compose-start.err
