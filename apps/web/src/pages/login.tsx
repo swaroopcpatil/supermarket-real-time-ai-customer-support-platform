@@ -18,8 +18,16 @@ export default function LoginPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Unable to sign in.');
+      const contentType = response.headers.get('content-type') || '';
+      const data = contentType.includes('application/json')
+        ? await response.json()
+        : null;
+      if (!response.ok) {
+        throw new Error(
+          data?.detail || 'Unable to sign in. Please try again in a moment.'
+        );
+      }
+      if (!data) throw new Error('Unable to sign in. Please try again in a moment.');
       localStorage.setItem('supermarket_auth', JSON.stringify(data));
       router.push(data.role === 'ADMIN' ? '/admin' : '/chat');
     } catch (err) {

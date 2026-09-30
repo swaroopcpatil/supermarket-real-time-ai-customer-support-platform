@@ -4,7 +4,7 @@ sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import List
 from services.shared_platform.data import get_order, customer_orders, cancel, now, _orders
 from services.shared_platform.observability import TraceMiddleware
 

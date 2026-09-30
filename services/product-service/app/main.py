@@ -2,10 +2,9 @@ import sys
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
-from fastapi import FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from services.shared_platform.data import products as get_all_products, now
 from services.shared_platform.observability import TraceMiddleware
 
@@ -111,11 +110,14 @@ def update_product(product_id: str, payload: ProductUpdate):
     p = PRODUCTS_STORE.get(product_id.upper())
     if not p:
         raise HTTPException(status_code=404, detail=f"Product {product_id} not found")
-    if payload.name is not None: p["name"] = payload.name
-    if payload.price is not None: p["price"] = payload.price
+    if payload.name is not None:
+        p["name"] = payload.name
+    if payload.price is not None:
+        p["price"] = payload.price
     if payload.stock_quantity is not None:
         p["stock_quantity"] = payload.stock_quantity
         p["is_available"] = payload.stock_quantity > 0
-    if payload.is_available is not None: p["is_available"] = payload.is_available
+    if payload.is_available is not None:
+        p["is_available"] = payload.is_available
     p["updated_at"] = now()
     return p

@@ -3,12 +3,12 @@ import importlib
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
-from fastapi import FastAPI, HTTPException, Depends, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import httpx
-from services.shared_platform.auth import hash_password, verify_password, issue_token, decode_token
+from services.shared_platform.auth import hash_password, verify_password, issue_token
 from services.shared_platform.data import now
 from services.shared_platform.observability import TraceMiddleware
 from services.shared_platform.settings import service_url
@@ -60,7 +60,7 @@ def health():
 @app.get("/api/metrics")
 @app.get("/metrics")
 def metrics():
-    return f"# HELP total_gateway_requests Count of routed API requests\ntotal_gateway_requests 1\n"
+    return "# HELP total_gateway_requests Count of routed API requests\ntotal_gateway_requests 1\n"
 
 # Auth routes
 @app.post("/api/auth/register")

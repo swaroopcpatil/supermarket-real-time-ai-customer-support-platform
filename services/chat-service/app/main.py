@@ -5,13 +5,13 @@ import importlib
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 import httpx
 from services.shared_platform.data import now
 from services.shared_platform.observability import TraceMiddleware
-from services.shared_platform.settings import setting, service_url
+from services.shared_platform.settings import service_url
 
 app = FastAPI(title="Chat Service", version="1.0.0", docs_url="/api/docs", openapi_url="/api/openapi.json")
 app.add_middleware(TraceMiddleware)

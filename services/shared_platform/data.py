@@ -1,6 +1,4 @@
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
-from uuid import uuid4
+from datetime import UTC, datetime
 
 
 def now() -> str:
@@ -54,7 +52,8 @@ def customer_orders(customer_id: str) -> list[dict]:
 def cancel(order_id: str) -> dict | None:
     order = get_order(order_id)
     if order and order["status"] in {"PLACED", "CONFIRMED", "PACKING"}:
-        order["status"] = "CANCELLED"; order["updated_at"] = now()
+        order["status"] = "CANCELLED"
+        order["updated_at"] = now()
     return order
 
 
@@ -73,7 +72,8 @@ _refunds: list[dict] = []
 
 def create_ticket(customer_id: str, description: str, category: str = "ESCALATION") -> dict:
     ticket = {"id": f"TKT-{len(_tickets)+1001}", "customer_id": customer_id, "conversation_id": None, "category": category, "priority": "HIGH", "description": description, "status": "OPEN", "assigned_agent": None, "created_at": now(), "updated_at": now()}
-    _tickets.append(ticket); return ticket
+    _tickets.append(ticket)
+    return ticket
 
 
 def all_tickets(customer_id: str | None = None) -> list[dict]:
@@ -82,4 +82,5 @@ def all_tickets(customer_id: str | None = None) -> list[dict]:
 
 def create_refund(order_id: str, customer_id: str, reason: str, amount: float = 0) -> dict:
     refund = {"refund_id": f"RFD-{len(_refunds)+1001}", "order_id": order_id, "customer_id": customer_id, "reason": reason, "status": "UNDER_REVIEW", "amount": amount, "created_at": now(), "processed_at": None}
-    _refunds.append(refund); return refund
+    _refunds.append(refund)
+    return refund

@@ -1,12 +1,11 @@
 import sys
 import re
-import math
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import Optional
 from services.shared_platform.data import DOCUMENTS, now
 from services.shared_platform.observability import TraceMiddleware
 

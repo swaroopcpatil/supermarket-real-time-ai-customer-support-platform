@@ -2,12 +2,12 @@ import json
 import re
 import asyncio
 from abc import ABC, abstractmethod
-from typing import AsyncGenerator, Dict, Any, List
+from typing import AsyncGenerator, Dict, Any
 import httpx
-from services.shared_platform.settings import setting, service_url
+from services.shared_platform.settings import setting
 from services.shared_platform.data import (
     get_order, customer_orders, cancel as cancel_order_db,
-    products as get_all_products, create_refund, create_ticket, DOCUMENTS
+    products as get_all_products, create_refund, create_ticket
 )
 
 
@@ -73,12 +73,15 @@ class NIMProvider(LLMProvider):
                 async with client.stream("POST", f"{self.base_url.rstrip('/')}/chat/completions", headers=headers, json=payload) as response:
                     response.raise_for_status()
                     async for line in response.aiter_lines():
-                        if not line.startswith("data:"): continue
+                        if not line.startswith("data:"):
+                            continue
                         value = line[5:].strip()
-                        if value == "[DONE]": return
+                        if value == "[DONE]":
+                            return
                         try:
                             token = json.loads(value)["choices"][0].get("delta", {}).get("content", "")
-                            if token: yield token
+                            if token:
+                                yield token
                         except (json.JSONDecodeError, KeyError, IndexError, TypeError):
                             continue
                     return
@@ -166,7 +169,7 @@ class MockLLMProvider(LLMProvider):
                     price_str = f"₹{p['discount_price']} (Discounted from ₹{p['price']})" if p.get("discount_price") else f"₹{p['price']}"
                     stock_str = f"In Stock ({p['stock_quantity']} units left)" if p["is_available"] else "Out of stock"
                     item_lines.append(f"• **{p['name']}** ({p['brand']}) - {price_str} | {stock_str}")
-                reply = f"Here are the product details you requested:\n\n" + "\n".join(item_lines)
+                reply = "Here are the product details you requested:\n\n" + "\n".join(item_lines)
             else:
                 reply = "I searched our product catalog but couldn't find exact matches for your request."
 

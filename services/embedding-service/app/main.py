@@ -1,12 +1,11 @@
 import sys
-import os
 import random
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import List, Optional
+from typing import List
 import httpx
 from services.shared_platform.data import now
 from services.shared_platform.observability import TraceMiddleware

@@ -1,4 +1,3 @@
-import pytest
 import importlib
 
 rag_module = importlib.import_module("services.rag-service.app.main")

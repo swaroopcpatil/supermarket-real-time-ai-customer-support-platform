@@ -1,4 +1,3 @@
-import pytest
 import importlib
 
 order_module = importlib.import_module("services.order-service.app.main")

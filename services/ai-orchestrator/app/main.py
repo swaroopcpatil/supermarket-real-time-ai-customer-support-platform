@@ -40,7 +40,7 @@ def health():
 
 @app.get("/metrics")
 def metrics():
-    return f"# HELP total_ai_requests Count of processed AI orchestration requests\ntotal_ai_requests 1\n"
+    return "# HELP total_ai_requests Count of processed AI orchestration requests\ntotal_ai_requests 1\n"
 
 @app.post("/orchestrate")
 async def orchestrate(req: OrchestrationRequest):

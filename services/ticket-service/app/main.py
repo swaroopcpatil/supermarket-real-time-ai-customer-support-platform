@@ -4,7 +4,7 @@ sys.path.append(str(Path(__file__).resolve().parents[3]))
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 from services.shared_platform.data import create_ticket, all_tickets, _tickets, now
 from services.shared_platform.observability import TraceMiddleware
 
@@ -33,8 +33,10 @@ def metrics():
 @app.post("/tickets", status_code=201)
 def new_ticket(payload: TicketCreate):
     ticket = create_ticket(payload.customer_id, payload.description, payload.category or "GENERAL")
-    if payload.conversation_id: ticket["conversation_id"] = payload.conversation_id
-    if payload.priority: ticket["priority"] = payload.priority
+    if payload.conversation_id:
+        ticket["conversation_id"] = payload.conversation_id
+    if payload.priority:
+        ticket["priority"] = payload.priority
     return ticket
 
 @app.get("/tickets")
@@ -53,7 +55,8 @@ def update_ticket_status(ticket_id: str, payload: TicketStatusUpdate):
     for t in _tickets:
         if t["id"].upper() == ticket_id.upper():
             t["status"] = payload.status
-            if payload.assigned_agent: t["assigned_agent"] = payload.assigned_agent
+            if payload.assigned_agent:
+                t["assigned_agent"] = payload.assigned_agent
             t["updated_at"] = now()
             return t
     raise HTTPException(status_code=404, detail=f"Ticket {ticket_id} not found")

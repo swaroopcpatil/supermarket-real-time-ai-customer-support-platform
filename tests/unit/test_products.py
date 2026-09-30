@@ -1,4 +1,3 @@
-import pytest
 import importlib
 
 prod_module = importlib.import_module("services.product-service.app.main")
