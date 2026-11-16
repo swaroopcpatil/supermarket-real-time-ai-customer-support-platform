@@ -189,12 +189,12 @@ begin
      where id = 1;
   exception when others then
     -- Open Food Facts outages and rate limits are temporary: keep the same
-    -- page and try again on the next run. Only after 30 consecutive failures
-    -- (an hour at the 2-minute schedule) skip the page and reset the counter.
+    -- page and try again on the next run. Only after 720 consecutive failures
+    -- (a day at the 2-minute schedule) skip the page and reset the counter.
     update catalog_import.progress
-       set failures = case when failures + 1 >= 30 then 0 else failures + 1 end,
-           next_page = case when failures + 1 >= 30 then next_page + 1 else next_page end,
-           log = log || case when failures + 1 >= 30 then st.next_page || ':skipped ' else '' end,
+       set failures = case when failures + 1 >= 720 then 0 else failures + 1 end,
+           next_page = case when failures + 1 >= 720 then next_page + 1 else next_page end,
+           log = log || case when failures + 1 >= 720 then st.next_page || ':skipped ' else '' end,
            updated_at = now()
      where id = 1;
   end;
