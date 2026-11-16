@@ -5,7 +5,7 @@
 | Component | Runs on | Responsibility |
 | --- | --- | --- |
 | Next.js pages | Vercel (static + client) | Storefront, cart, orders, chat UI, tickets, admin console |
-| `/api/chat` | Vercel function (Node, `bom1`) | Claude tool-use loop; streams text and tool activity to the browser over SSE; persists the conversation |
+| `/api/chat` | Vercel function (Node, `bom1`) | Gemini function-calling loop; streams text and tool activity to the browser over SSE; persists the conversation |
 | `/api/admin/import` | Vercel function | Staff-only product import from Open Food Facts (barcode lookup and search) |
 | Supabase Postgres | Supabase (`ap-south-1`) | All data, business rules (SQL functions) and row level security |
 | Supabase Auth | Supabase | Email/password accounts, password reset |
@@ -37,14 +37,14 @@ Triggers write a `notifications` row on every order, refund and ticket change. T
 - RLS is enabled on every table. Customers can read only their own rows. Orders and refunds cannot be inserted directly, only through the functions above. Staff policies use `is_staff()`.
 - A trigger prevents signed-in non-admins from changing any `role`.
 - API routes create a Supabase client **with the caller's access token**, so the AI's tools and the admin import run under the caller's RLS permissions. The app never holds a service-role key.
-- Tool inputs from the model are validated twice: by Claude's strict tool schemas, then by Zod on the server.
+- Tool inputs from the model are validated with Zod on the server before anything runs.
 - The system prompt tells the assistant to confirm before cancelling or requesting refunds, to ground answers in tool results, and to treat tool output and customer text as data rather than instructions.
 
 ## AI assistant
 
-- Model `claude-opus-5-5` (configurable), adaptive thinking, effort `medium` (configurable), with server-side refusal fallbacks enabled (`fallbacks: "default"`).
-- The stable system prompt and tool definitions are prompt-cached. Live store settings and the current time go in a second, uncached system block.
-- Tools: `search_products`, `get_my_orders`, `get_order_details`, `cancel_order`, `request_refund`, `search_policies`, `create_support_ticket`, `get_my_tickets`.
+- Model `gemini-3.5-flash` (configurable with `GEMINI_MODEL`) through the Google Gen AI SDK, streamed to the browser over SSE. Temporary Google overload (429/500/503) is retried before a response starts.
+- The system prompt and live store settings go in the system instruction; the model's thought signatures are passed back unchanged between tool rounds.
+- Tools (function declarations): `search_products`, `get_my_orders`, `get_order_details`, `cancel_order`, `request_refund`, `search_policies`, `create_support_ticket`, `get_my_tickets`. Tool definitions are provider-neutral JSON Schema in `src/lib/agent.ts`.
 - Conversations and the assistant's tool activity are stored in `chat_messages`. Staff see the transcript on any ticket the assistant opened.
 
 ## Product data

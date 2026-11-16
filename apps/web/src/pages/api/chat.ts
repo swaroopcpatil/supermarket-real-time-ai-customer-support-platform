@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
-import Anthropic from '@anthropic-ai/sdk';
+import { ApiError, GoogleGenAI, type Content, type FunctionCall, type Part } from '@google/genai';
 import { z } from 'zod';
 import { supabaseForToken } from '@/lib/supabase';
 import { SYSTEM_PROMPT, TOOLS, runTool, storeContext } from '@/lib/agent';
@@ -7,13 +7,7 @@ import type { AiActivity, StoreSettings } from '@/lib/types';
 
 export const config = { maxDuration: 120 };
 
-type BetaMessageParam = Anthropic.Beta.Messages.BetaMessageParam;
-type BetaMessage = Anthropic.Beta.Messages.BetaMessage;
-type BetaToolUseBlock = Anthropic.Beta.Messages.BetaToolUseBlock;
-type BetaToolResultBlockParam = Anthropic.Beta.Messages.BetaToolResultBlockParam;
-
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-5-5';
-const EFFORT = (process.env.ANTHROPIC_EFFORT || 'medium') as 'low' | 'medium' | 'high';
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash';
 const MAX_TOOL_ROUNDS = 8;
 const HISTORY_LIMIT = 30;
 
@@ -22,10 +16,31 @@ const Body = z.object({
   conversation_id: z.string().uuid().nullable().optional(),
 });
 
-let anthropic: Anthropic | null = null;
-function client(): Anthropic {
-  if (!anthropic) anthropic = new Anthropic();
-  return anthropic;
+let genai: GoogleGenAI | null = null;
+function client(): GoogleGenAI {
+  if (!genai) genai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  return genai;
+}
+
+const FUNCTION_DECLARATIONS = TOOLS.map((t) => ({
+  name: t.name,
+  description: t.description,
+  parametersJsonSchema: t.input_schema,
+}));
+
+type StreamParams = Parameters<GoogleGenAI['models']['generateContentStream']>[0];
+
+/** Open the response stream, retrying Google's temporary overload (429/500/503) a few times. */
+async function openStream(params: StreamParams, signal: AbortSignal) {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await client().models.generateContentStream(params);
+    } catch (err) {
+      const retryable = err instanceof ApiError && [429, 500, 503].includes(err.status);
+      if (!retryable || attempt >= 3 || signal.aborted) throw err;
+      await new Promise((r) => setTimeout(r, 800 * attempt));
+    }
+  }
 }
 
 function send(res: NextApiResponse, event: Record<string, unknown>) {
@@ -37,8 +52,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader('Allow', 'POST');
     return res.status(405).json({ error: 'Method not allowed' });
   }
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return res.status(503).json({ error: 'The AI assistant is not configured yet (ANTHROPIC_API_KEY is missing).' });
+  if (!process.env.GEMINI_API_KEY) {
+    return res.status(503).json({ error: 'The AI assistant is not configured yet (GEMINI_API_KEY is missing).' });
   }
 
   const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -77,12 +92,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   await db.from('chat_messages').insert({ conversation_id: conversationId, role: 'user', content: parsed.data.message });
   await db.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', conversationId);
 
-  // Prior turns are replayed as plain text; the API merges consecutive same-role turns.
-  const messages: BetaMessageParam[] = (history || [])
-    .reverse()
-    .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-  while (messages.length && messages[0].role !== 'user') messages.shift();
-  messages.push({ role: 'user', content: parsed.data.message });
+  // Prior turns are replayed as plain text. Gemini requires the history to
+  // start with a user turn and alternate, so same-role neighbours are merged.
+  const contents: Content[] = [];
+  for (const m of (history || []).reverse()) {
+    const role = m.role === 'assistant' ? 'model' : 'user';
+    const last = contents[contents.length - 1];
+    if (!last && role === 'model') continue;
+    if (last && last.role === role) last.parts!.push({ text: m.content });
+    else contents.push({ role, parts: [{ text: m.content }] });
+  }
+  const last = contents[contents.length - 1];
+  if (last && last.role === 'user') last.parts!.push({ text: parsed.data.message });
+  else contents.push({ role: 'user', parts: [{ text: parsed.data.message }] });
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream; charset=utf-8',
@@ -95,89 +117,93 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const activity: AiActivity = { tools: [], model: MODEL };
   let finalText = '';
   let aborted = false;
-  let current: { abort: () => void } | null = null;
+  const abort = new AbortController();
   req.on('close', () => {
     aborted = true;
-    current?.abort();
+    abort.abort();
   });
 
-  const system = [
-    { type: 'text' as const, text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' as const } },
-    { type: 'text' as const, text: storeContext(settings as StoreSettings | null, profile?.full_name ?? null) },
-  ];
+  const systemInstruction = `${SYSTEM_PROMPT}\n\n--- Live store information ---\n${storeContext(settings as StoreSettings | null, profile?.full_name ?? null)}`;
 
   try {
     for (let round = 0; round < MAX_TOOL_ROUNDS && !aborted; round++) {
-      const stream = client().beta.messages.stream({
-        model: MODEL,
-        max_tokens: 16000,
-        system,
-        tools: TOOLS,
-        messages,
-        output_config: { effort: EFFORT },
-        // Re-run the request on a fallback model if a safety classifier declines it.
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-      });
-      current = stream;
+      const stream = await openStream(
+        {
+          model: MODEL,
+          contents,
+          config: {
+            systemInstruction,
+            tools: [{ functionDeclarations: FUNCTION_DECLARATIONS }],
+            maxOutputTokens: 8192,
+            abortSignal: abort.signal,
+          },
+        },
+        abort.signal,
+      );
 
+      // Keep every part exactly as received: Gemini attaches thought
+      // signatures to parts and expects them back on the next request.
+      const modelParts: Part[] = [];
+      const calls: FunctionCall[] = [];
       let roundText = '';
-      stream.on('text', (delta) => {
-        roundText += delta;
-        send(res, { type: 'text', text: delta });
-      });
-
-      const message: BetaMessage = await stream.finalMessage();
-      current = null;
-      activity.stop_reason = message.stop_reason;
-      activity.model = message.model;
+      let finishReason: string | undefined;
+      for await (const chunk of stream) {
+        const candidate = chunk.candidates?.[0];
+        if (candidate?.finishReason) finishReason = candidate.finishReason;
+        for (const part of candidate?.content?.parts || []) {
+          modelParts.push(part);
+          if (part.functionCall) calls.push(part.functionCall);
+          else if (part.text && !part.thought) {
+            roundText += part.text;
+            send(res, { type: 'text', text: part.text });
+          }
+        }
+      }
+      activity.stop_reason = finishReason ?? null;
       if (roundText) finalText += (finalText ? '\n\n' : '') + roundText;
 
-      if (message.stop_reason === 'refusal') {
-        const note = "I'm sorry, I can't help with that request. If you need help with an order, I can open a ticket for a support agent.";
-        send(res, { type: 'text', text: (roundText ? '\n\n' : '') + note });
-        finalText += (finalText ? '\n\n' : '') + note;
+      if (calls.length === 0) {
+        if (!roundText && finishReason && finishReason !== 'STOP') {
+          // Blocked by a safety filter or otherwise cut off without an answer.
+          console.error('[chat] Gemini finished without output:', finishReason);
+          const note = "I'm sorry, I couldn't answer that. If you need help with an order, you can open a ticket from Support Tickets and our team will follow up.";
+          send(res, { type: 'text', text: note });
+          finalText += (finalText ? '\n\n' : '') + note;
+        }
         break;
       }
-      if (message.stop_reason === 'pause_turn') {
-        messages.push({ role: 'assistant', content: message.content });
-        continue;
-      }
 
-      const toolUses = message.content.filter((b): b is BetaToolUseBlock => b.type === 'tool_use');
-      if (message.stop_reason !== 'tool_use' || toolUses.length === 0) break;
-
-      messages.push({ role: 'assistant', content: message.content });
-      const results: BetaToolResultBlockParam[] = [];
-      for (const call of toolUses) {
-        send(res, { type: 'tool_start', id: call.id, name: call.name, input: call.input });
-        const outcome = await runTool(call.name, call.input, { db, userId, conversationId });
+      contents.push({ role: 'model', parts: modelParts });
+      const responses: Part[] = [];
+      for (let i = 0; i < calls.length; i++) {
+        const call = calls[i];
+        const name = call.name || '';
+        const id = call.id || `${round}-${i}`;
+        send(res, { type: 'tool_start', id, name, input: call.args });
+        const outcome = await runTool(name, call.args ?? {}, { db, userId, conversationId });
         if (outcome.escalated) activity.escalated = true;
-        activity.tools.push({ name: call.name, input: call.input, ok: outcome.ok, summary: outcome.summary });
-        send(res, { type: 'tool_end', id: call.id, name: call.name, ok: outcome.ok, summary: outcome.summary });
-        results.push({
-          type: 'tool_result',
-          tool_use_id: call.id,
-          content: JSON.stringify(outcome.result),
-          ...(outcome.ok ? {} : { is_error: true }),
+        activity.tools.push({ name, input: call.args, ok: outcome.ok, summary: outcome.summary });
+        send(res, { type: 'tool_end', id, name, ok: outcome.ok, summary: outcome.summary });
+        responses.push({
+          functionResponse: {
+            ...(call.id ? { id: call.id } : {}),
+            name,
+            response: outcome.ok ? { output: outcome.result } : { error: outcome.result },
+          },
         });
       }
-      // All results for one assistant turn go back in a single user message.
-      messages.push({ role: 'user', content: results });
+      // All results for one model turn go back in a single user turn.
+      contents.push({ role: 'user', parts: responses });
     }
   } catch (err) {
     if (!aborted) {
       // Customers never see billing or configuration details; staff see them in the logs.
       const handOff = ' You can still reach our team from Support Tickets → New ticket.';
       let message = `The assistant is temporarily unavailable. Please try again in a moment.${handOff}`;
-      if (err instanceof Anthropic.RateLimitError) {
-        message = 'The assistant is busy right now. Please try again in a minute.';
-      } else if (err instanceof Anthropic.APIError) {
-        const billing = /credit balance|billing/i.test(err.message);
-        console.error(`[chat] Anthropic API error${billing ? ' (BILLING: add credits at console.anthropic.com)' : ''}`, err.status, err.message);
-        if (billing || err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
-          message = `The assistant is offline right now.${handOff}`;
-        }
+      if (err instanceof ApiError) {
+        console.error('[chat] Gemini API error', err.status, err.message);
+        if (err.status === 429) message = 'The assistant is busy right now. Please try again in a minute.';  // quota or rate limit; also visible in /api/health
+        else if (err.status === 400 || err.status === 401 || err.status === 403) message = `The assistant is offline right now.${handOff}`;
       } else {
         console.error('[chat] unexpected error', err);
       }

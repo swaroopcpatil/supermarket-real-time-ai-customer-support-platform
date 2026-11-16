@@ -4,7 +4,7 @@ A production-ready online supermarket with a real-time AI customer support assis
 
 - **Storefront**: browse the catalogue, cart, checkout with cash/UPI/card on delivery.
 - **Live order tracking**: customers see status changes the moment staff update them, with in-app notifications.
-- **AI support assistant** (Claude): answers from your real catalogue, your customers' real orders and your own policies. It can cancel orders, submit refund requests and open tickets for a human. It never approves refunds itself.
+- **AI support assistant** (Google Gemini): answers from your real catalogue, your customers' real orders and your own policies. It can cancel orders, submit refund requests and open tickets for a human. It never approves refunds itself.
 - **Store admin**: fulfil orders, review refunds, answer tickets (with the AI chat transcript attached), manage products/prices/stock, edit policies, manage staff.
 - **Real product data**: products are imported from [Open Food Facts](https://world.openfoodfacts.org), a free, open database of real packaged foods with strong Indian coverage. Price and stock come from your store (admin screen or CSV export from your POS).
 
@@ -16,7 +16,7 @@ Browser (Next.js pages)  ──supabase-js──►  Supabase
    │                                          ├─ Auth (email + password)
    │                                          └─ Realtime (orders, refunds, tickets, notifications, products)
    │
-   └── /api/chat (Vercel function) ──► Claude API (tool use, streamed over SSE)
+   └── /api/chat (Vercel function) ──► Gemini API (function calling, streamed over SSE)
    │         └── tools run as the signed-in customer through Supabase RLS
    └── /api/admin/import (Vercel function) ──► Open Food Facts API
 ```
@@ -28,7 +28,7 @@ It deploys as **one Next.js app on Vercel plus one Supabase project**, with no s
 - **Prices, stock, refund limits and cancellation rules are enforced in the database** (`place_order`, `cancel_order`, `request_refund`, `set_order_status`, `review_refund`), not trusted from the browser or the AI.
 - **Row level security on every table.** Customers only ever see their own orders, refunds, tickets, chats and notifications. Staff see everything. Customers cannot change their own role.
 - **The AI uses the customer's own session.** Its tools go through the same RLS rules, so it cannot read or change another customer's data even if prompted to.
-- **No service-role key in the app.** The only secrets are the Anthropic key (server-side) and the Supabase publishable key (safe for browsers).
+- **No service-role key in the app.** The only secrets are the Gemini API key (server-side) and the Supabase publishable key (safe for browsers).
 
 ## Repository layout
 
@@ -36,7 +36,7 @@ It deploys as **one Next.js app on Vercel plus one Supabase project**, with no s
 | --- | --- |
 | `apps/web` | Next.js app (pages, API routes, components). This is the Vercel project root. |
 | `apps/web/src/lib/agent.ts` | AI assistant tools and system prompt |
-| `apps/web/src/pages/api/chat.ts` | Streaming chat endpoint (Claude tool-use loop over SSE) |
+| `apps/web/src/pages/api/chat.ts` | Streaming chat endpoint (Gemini function-calling loop over SSE) |
 | `apps/web/src/lib/openfoodfacts.ts` | Open Food Facts client (barcode lookup and search) |
 | `supabase/migrations` | Database schema, business functions, RLS, realtime |
 | `supabase/seed` | Starter policies and an initial set of real products |
@@ -57,11 +57,12 @@ Import the repository in Vercel and set **Root Directory = `apps/web`**. Add the
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase → Settings → API → Project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase publishable (anon) key |
-| `ANTHROPIC_API_KEY` | From console.anthropic.com |
-| `ANTHROPIC_MODEL` *(optional)* | Defaults to `claude-opus-5-5` |
-| `ANTHROPIC_EFFORT` *(optional)* | `low`, `medium` (default) or `high` |
+| `GEMINI_API_KEY` | From aistudio.google.com/apikey. **Enable billing on the Google project** (see below) |
+| `GEMINI_MODEL` *(optional)* | Defaults to `gemini-3.5-flash` |
 
 Functions run in Mumbai (`bom1`, set in `apps/web/vercel.json`), next to the database.
+
+> **Gemini free tier is not enough for a live store.** It allows 5 model requests a minute (one customer message uses 2–3 of them), and Google may use free-tier prompts to improve its products, which would include customers' order details and addresses. Turn on billing for the Google Cloud project behind the key (AI Studio → Settings → Plan information) before taking real customers.
 
 ### 3. Create the first admin
 
@@ -97,7 +98,7 @@ MRP is not imported. Open Food Facts doesn't publish it, and retailer sites (DMa
 
 ```bash
 cd apps/web
-cp .env.example .env.local   # fill in your Supabase and Anthropic values
+cp .env.example .env.local   # fill in your Supabase and Gemini values
 npm install
 npm run dev
 ```

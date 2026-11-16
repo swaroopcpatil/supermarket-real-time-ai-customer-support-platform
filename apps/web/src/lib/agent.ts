@@ -1,9 +1,13 @@
-import type Anthropic from '@anthropic-ai/sdk';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import type { StoreSettings } from './types';
 
-type BetaTool = Anthropic.Beta.Messages.BetaTool;
+/** Provider-neutral tool definition: a name, a description and a JSON Schema for the input. */
+export interface ToolDef {
+  name: string;
+  description: string;
+  input_schema: { type: 'object'; properties: Record<string, unknown>; required: string[]; additionalProperties: false };
+}
 
 const nullableString = { type: ['string', 'null'] } as const;
 
@@ -13,12 +17,11 @@ const nullableString = { type: ['string', 'null'] } as const;
  * customer's orders, refunds and tickets — the model cannot reach anyone
  * else's data even if asked to.
  */
-export const TOOLS: BetaTool[] = [
+export const TOOLS: ToolDef[] = [
   {
     name: 'search_products',
     description:
       'Search the store catalogue by product name, brand or category. Returns price (INR), MRP and whether it is in stock. Use for any question about product availability, prices, alternatives or recommendations.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -33,7 +36,6 @@ export const TOOLS: BetaTool[] = [
   {
     name: 'get_my_orders',
     description: "List the customer's most recent orders with their status and totals.",
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { limit: { type: 'integer', description: 'How many orders to return (1-10).' } },
@@ -44,7 +46,6 @@ export const TOOLS: BetaTool[] = [
   {
     name: 'get_order_details',
     description: 'Get full details of one of the customer\'s orders: status, items, totals, address, payment and any refund requests.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { order_number: { type: 'string', description: 'Order number such as ORD-100001.' } },
@@ -56,7 +57,6 @@ export const TOOLS: BetaTool[] = [
     name: 'cancel_order',
     description:
       'Cancel one of the customer\'s orders. Only works while the order is still cancellable (see store rules). Only call this after the customer has clearly confirmed they want this specific order cancelled.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -71,7 +71,6 @@ export const TOOLS: BetaTool[] = [
     name: 'request_refund',
     description:
       'Submit a refund request for a delivered order. The request is reviewed by staff; you cannot approve it. Only call after the customer has described the problem and confirmed they want a refund requested.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -86,7 +85,6 @@ export const TOOLS: BetaTool[] = [
   {
     name: 'search_policies',
     description: 'Search the store policy knowledge base (refunds, returns, delivery, cancellation, payment, hours). Use before answering any policy question.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: { query: { type: 'string' } },
@@ -98,7 +96,6 @@ export const TOOLS: BetaTool[] = [
     name: 'create_support_ticket',
     description:
       'Escalate to a human support agent by opening a ticket. Use when the customer asks for a human, is upset, or the issue needs staff action you cannot take.',
-    strict: true,
     input_schema: {
       type: 'object',
       properties: {
@@ -115,12 +112,11 @@ export const TOOLS: BetaTool[] = [
   {
     name: 'get_my_tickets',
     description: "List the customer's support tickets and their status.",
-    strict: true,
     input_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
   },
 ];
 
-// Runtime validation of tool inputs (defence in depth on top of strict mode).
+// Runtime validation of every tool input the model produces.
 const schemas = {
   search_products: z.object({ query: z.string().max(200), category: z.string().max(60).nullable(), max_price: z.number().nonnegative().nullable() }),
   get_my_orders: z.object({ limit: z.number().int() }),

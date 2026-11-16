@@ -8,10 +8,9 @@ function fakeDb(rpcResult: { data: unknown; error: { message: string } | null })
 }
 
 describe('tool definitions', () => {
-  it('are strict, closed schemas that list every property as required', () => {
+  it('are closed schemas that list every property as required', () => {
     for (const tool of TOOLS) {
-      expect(tool.strict, tool.name).toBe(true);
-      const schema = tool.input_schema as unknown as { properties: Record<string, unknown>; required: string[]; additionalProperties: boolean };
+      const schema = tool.input_schema;
       expect(schema.additionalProperties, tool.name).toBe(false);
       expect([...schema.required].sort(), tool.name).toEqual(Object.keys(schema.properties).sort());
     }
