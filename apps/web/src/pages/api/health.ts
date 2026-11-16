@@ -25,10 +25,15 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
     result.ai = 'not configured (ANTHROPIC_API_KEY missing)';
   } else {
     try {
-      await new Anthropic({ maxRetries: 0, timeout: 10_000 }).models.retrieve(model);
+      const client = new Anthropic({ maxRetries: 0, timeout: 10_000 });
+      await client.models.retrieve(model);
+      // A key can be valid while the account has no credit, which only shows
+      // up on a real request. count_tokens exercises that path at no cost.
+      await client.messages.countTokens({ model, messages: [{ role: 'user', content: 'ping' }] });
       result.ai = 'ok';
     } catch (err) {
-      if (err instanceof Anthropic.AuthenticationError) result.ai = 'invalid API key';
+      if (err instanceof Anthropic.APIError && /credit balance|billing/i.test(err.message)) result.ai = 'no credit: add credits at console.anthropic.com (Plans & Billing)';
+      else if (err instanceof Anthropic.AuthenticationError) result.ai = 'invalid API key';
       else if (err instanceof Anthropic.PermissionDeniedError) result.ai = 'key not allowed to use this model';
       else if (err instanceof Anthropic.NotFoundError) result.ai = `model ${model} not found`;
       else if (err instanceof Anthropic.APIError) result.ai = `error ${err.status ?? ''}`.trim();

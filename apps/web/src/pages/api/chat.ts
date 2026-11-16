@@ -167,11 +167,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
   } catch (err) {
     if (!aborted) {
-      let message = 'The assistant is temporarily unavailable. Please try again in a moment.';
-      if (err instanceof Anthropic.RateLimitError) message = 'The assistant is busy right now. Please try again in a minute.';
-      else if (err instanceof Anthropic.AuthenticationError) message = 'The assistant is misconfigured (invalid API key). Please contact the store.';
-      else if (err instanceof Anthropic.APIError) console.error('[chat] Anthropic API error', err.status, err.message);
-      else console.error('[chat] unexpected error', err);
+      // Customers never see billing or configuration details; staff see them in the logs.
+      const handOff = ' You can still reach our team from Support Tickets → New ticket.';
+      let message = `The assistant is temporarily unavailable. Please try again in a moment.${handOff}`;
+      if (err instanceof Anthropic.RateLimitError) {
+        message = 'The assistant is busy right now. Please try again in a minute.';
+      } else if (err instanceof Anthropic.APIError) {
+        const billing = /credit balance|billing/i.test(err.message);
+        console.error(`[chat] Anthropic API error${billing ? ' (BILLING: add credits at console.anthropic.com)' : ''}`, err.status, err.message);
+        if (billing || err instanceof Anthropic.AuthenticationError || err instanceof Anthropic.PermissionDeniedError) {
+          message = `The assistant is offline right now.${handOff}`;
+        }
+      } else {
+        console.error('[chat] unexpected error', err);
+      }
       send(res, { type: 'error', error: message });
     }
   }
