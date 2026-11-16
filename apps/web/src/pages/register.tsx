@@ -1,41 +1,77 @@
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { getSupabase } from '@/lib/supabase';
 
-export default function RegisterPage() {
+export default function Register() {
   const router = useRouter();
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [form, setForm] = useState({ full_name: '', phone: '', email: '', password: '' });
   const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [done, setDone] = useState(false);
+  const [busy, setBusy] = useState(false);
 
-  async function register(event: React.FormEvent) {
-    event.preventDefault();
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (form.password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
+    setBusy(true);
     setError('');
-    setSubmitting(true);
-    try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ full_name: fullName, email, password }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || 'Unable to create account.');
-      localStorage.setItem('supermarket_auth', JSON.stringify(data));
-      router.push('/chat');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to create account.');
-    } finally { setSubmitting(false); }
+    const { data, error } = await getSupabase().auth.signUp({
+      email: form.email.trim(),
+      password: form.password,
+      options: {
+        data: { full_name: form.full_name.trim(), phone: form.phone.trim() || null },
+        emailRedirectTo: `${window.location.origin}/products`,
+      },
+    });
+    setBusy(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    if (data.session) router.replace('/products');
+    else setDone(true);
   }
 
-  return <div className="max-w-md mx-auto my-12 bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-    <div><h2 className="text-2xl font-bold text-slate-900">Create your account</h2><p className="text-xs text-slate-500 mt-1">Get help with supermarket orders and products.</p></div>
-    <form onSubmit={register} className="space-y-4">
-      <input required value={fullName} onChange={(e) => setFullName(e.target.value)} placeholder="Full name" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
-      <input required type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
-      <input required minLength={8} type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password (8+ characters)" className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm" />
-      {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
-      <button disabled={submitting} className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-3 rounded-xl text-sm">{submitting ? 'Creating account…' : 'Create account'}</button>
-    </form>
-    <p className="text-center text-xs text-slate-500">Already registered? <a className="font-semibold text-emerald-700 hover:underline" href="/login">Sign in</a></p>
-  </div>;
+  const field = (key: keyof typeof form, label: string, type = 'text', extra: Record<string, unknown> = {}) => (
+    <label className="block text-sm">
+      <span className="text-slate-700">{label}</span>
+      <input
+        type={type}
+        value={form[key]}
+        onChange={(e) => setForm({ ...form, [key]: e.target.value })}
+        className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2"
+        {...extra}
+      />
+    </label>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <form onSubmit={submit} className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-sm">
+        <h1 className="text-xl font-bold text-slate-800">Create your account</h1>
+        {done ? (
+          <p className="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-3">
+            Check your email to confirm your account, then sign in.
+          </p>
+        ) : (
+          <>
+            {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{error}</p>}
+            {field('full_name', 'Full name', 'text', { required: true, autoComplete: 'name' })}
+            {field('phone', 'Mobile number (optional)', 'tel', { autoComplete: 'tel' })}
+            {field('email', 'Email', 'email', { required: true, autoComplete: 'email' })}
+            {field('password', 'Password (min 8 characters)', 'password', { required: true, autoComplete: 'new-password', minLength: 8 })}
+            <button disabled={busy} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg py-2.5 font-medium disabled:opacity-60">
+              {busy ? 'Creating account…' : 'Create account'}
+            </button>
+          </>
+        )}
+        <p className="text-sm text-center text-slate-500">
+          Already have an account? <Link href="/login" className="text-emerald-700 font-medium">Sign in</Link>
+        </p>
+      </form>
+    </div>
+  );
 }

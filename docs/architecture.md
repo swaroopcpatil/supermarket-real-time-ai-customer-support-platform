@@ -1,26 +1,52 @@
-# Supermarket AI Platform Architecture Overview
+# Architecture
 
-## Component Breakdown
+## Components
 
-1. **Next.js Web UI (`apps/web`)**
-   - React 18 & Next.js dashboard with WebSocket real-time chat.
-   - Interactive tool call indicators, RAG citations, and AI Observability toggle panel.
+| Component | Runs on | Responsibility |
+| --- | --- | --- |
+| Next.js pages | Vercel (static + client) | Storefront, cart, orders, chat UI, tickets, admin console |
+| `/api/chat` | Vercel function (Node, `bom1`) | Claude tool-use loop; streams text and tool activity to the browser over SSE; persists the conversation |
+| `/api/admin/import` | Vercel function | Staff-only product import from Open Food Facts (barcode lookup and search) |
+| Supabase Postgres | Supabase (`ap-south-1`) | All data, business rules (SQL functions) and row level security |
+| Supabase Auth | Supabase | Email/password accounts, password reset |
+| Supabase Realtime | Supabase | Pushes order, refund, ticket, notification and product changes to browsers |
 
-2. **API Gateway (`services/api-gateway`)**
-   - Single point of entry for external requests.
-   - Handles JWT authentication, rate limiting, and request tracing via `X-Request-ID`.
+The previous design (ten Python microservices, Kafka, Redis, Prometheus) cannot run on Vercel and kept all data in memory. It was replaced by this two-service design: the same features with nothing to operate.
 
-3. **Chat Service (`services/chat-service`)**
-   - Manages customer chat sessions and WebSockets.
-   - Streams real-time tokens to the client frontend.
+## Data model
 
-4. **AI Orchestrator (`services/ai-orchestrator`)**
-   - Multi-agent router classifying user intent.
-   - Integrates NVIDIA NIM (`NIMProvider`) with zero-cost fallback (`MockLLMProvider`).
+`profiles` (1:1 with `auth.users`, role `customer | staff | admin`), `products`, `orders` + `order_items`, `refunds`, `tickets`, `conversations` + `chat_messages`, `notifications`, `kb_documents` (store policies, full-text indexed), and `store_settings` (a single row of business rules).
 
-5. **RAG Service & Embedding Service (`services/rag-service`, `services/embedding-service`)**
-   - Vector similarity search powered by PostgreSQL and `pgvector`.
-   - Indexes product policies, FAQs, store hours, and return rules.
+Human-readable numbers (`ORD-100001`, `RFD-100001`, `TKT-100001`) come from database sequences.
 
-6. **Microservices Domain Layer**
-   - Product Service, Order Service, Refund Service, Ticket Service, Notification Service.
+## Business rules live in the database
+
+| Function | Who | What it enforces |
+| --- | --- | --- |
+| `place_order(items, address, payment, notes)` | customer | Prices read from `products`; stock checked and decremented atomically (row locks); delivery fee from `store_settings` |
+| `cancel_order(order_number, reason)` | owner or staff | Only while status is in `store_settings.cancellable_statuses`; returns stock |
+| `request_refund(order_number, reason, amount)` | owner | Delivered orders only, inside the refund window, total refunds capped at the order total; always `PENDING` |
+| `set_order_status(order_id, status)` | staff | Fulfilment transitions; sets `delivered_at` and marks COD orders paid on delivery |
+| `review_refund(refund_id, approve, note)` | staff | Approves or rejects; updates the order's payment status |
+| `admin_stats()` | staff | Dashboard counters |
+
+Triggers write a `notifications` row on every order, refund and ticket change. The browser receives them over Realtime.
+
+## Security model
+
+- RLS is enabled on every table. Customers can read only their own rows. Orders and refunds cannot be inserted directly, only through the functions above. Staff policies use `is_staff()`.
+- A trigger prevents signed-in non-admins from changing any `role`.
+- API routes create a Supabase client **with the caller's access token**, so the AI's tools and the admin import run under the caller's RLS permissions. The app never holds a service-role key.
+- Tool inputs from the model are validated twice: by Claude's strict tool schemas, then by Zod on the server.
+- The system prompt tells the assistant to confirm before cancelling or requesting refunds, to ground answers in tool results, and to treat tool output and customer text as data rather than instructions.
+
+## AI assistant
+
+- Model `claude-opus-5-5` (configurable), adaptive thinking, effort `medium` (configurable), with server-side refusal fallbacks enabled (`fallbacks: "default"`).
+- The stable system prompt and tool definitions are prompt-cached. Live store settings and the current time go in a second, uncached system block.
+- Tools: `search_products`, `get_my_orders`, `get_order_details`, `cancel_order`, `request_refund`, `search_policies`, `create_support_ticket`, `get_my_tickets`.
+- Conversations and the assistant's tool activity are stored in `chat_messages`. Staff see the transcript on any ticket the assistant opened.
+
+## Product data
+
+Open Food Facts supplies names, brands, images, ingredients and Nutri-Score. Store-owned fields (price, MRP, stock, visibility) are never overwritten by a re-import. Customers only see products that are active and priced.

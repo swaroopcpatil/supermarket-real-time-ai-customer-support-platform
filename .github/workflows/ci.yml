@@ -5,35 +5,27 @@ on:
   pull_request:
 
 jobs:
-  backend:
+  web:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Install test dependencies
-        run: pip install fastapi uvicorn pydantic httpx pyjwt pytest pytest-asyncio ruff==0.16.9
-      - name: Lint Python
-        run: ruff check services packages tests
-      - name: Run unit tests
-        run: python -m pytest tests/unit -v
-  frontend:
-    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
-      - name: Install frontend dependencies
-        run: npm ci --prefix apps/web
-      - name: Build frontend
-        run: npm run build --prefix apps/web
-  docker:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Validate Compose configuration
-        run: docker compose config -q
+      - name: Install dependencies
+        run: npm ci
+      - name: Type check
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Production build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: '1'
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high

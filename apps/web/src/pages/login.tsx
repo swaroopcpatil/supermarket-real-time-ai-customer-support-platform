@@ -1,80 +1,68 @@
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/router';
+import { getSupabase } from '@/lib/supabase';
 
-export default function LoginPage() {
-  const [email, setEmail] = useState('customer@supermarket.com');
-  const [password, setPassword] = useState('password123');
-  const [error, setError] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+export default function Login() {
   const router = useRouter();
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [info, setInfo] = useState('');
+  const [busy, setBusy] = useState(false);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
+    setBusy(true);
     setError('');
-    setSubmitting(true);
-    try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      });
-      const contentType = response.headers.get('content-type') || '';
-      const data = contentType.includes('application/json')
-        ? await response.json()
-        : null;
-      if (!response.ok) {
-        throw new Error(
-          data?.detail || 'Unable to sign in. Please try again in a moment.'
-        );
-      }
-      if (!data) throw new Error('Unable to sign in. Please try again in a moment.');
-      localStorage.setItem('supermarket_auth', JSON.stringify(data));
-      router.push(data.role === 'ADMIN' ? '/admin' : '/chat');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unable to sign in.');
-    } finally {
-      setSubmitting(false);
+    const { error } = await getSupabase().auth.signInWithPassword({ email: email.trim(), password });
+    setBusy(false);
+    if (error) {
+      setError(error.message === 'Email not confirmed' ? 'Please confirm your email first — check your inbox for the link.' : error.message);
+      return;
     }
-  };
+    const next = typeof router.query.next === 'string' && router.query.next.startsWith('/') ? router.query.next : '/products';
+    router.replace(next);
+  }
+
+  async function forgot() {
+    if (!email.trim()) {
+      setError('Enter your email above first.');
+      return;
+    }
+    const { error } = await getSupabase().auth.resetPasswordForEmail(email.trim(), {
+      redirectTo: `${window.location.origin}/reset-password`,
+    });
+    if (error) setError(error.message);
+    else setInfo('If that email has an account, a password reset link is on its way.');
+  }
 
   return (
-    <div className="max-w-md mx-auto my-12 bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">Customer Login</h2>
-        <p className="text-xs text-slate-500 mt-1">Sign in to access your supermarket orders and AI Assistant</p>
-      </div>
-
-      <form onSubmit={handleLogin} className="space-y-4">
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <form onSubmit={submit} className="w-full max-w-sm bg-white rounded-2xl border border-slate-200 p-6 space-y-4 shadow-sm">
         <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Email Address</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
+          <div className="w-10 h-10 rounded-xl bg-emerald-500 text-white flex items-center justify-center font-bold text-xl mb-3">S</div>
+          <h1 className="text-xl font-bold text-slate-800">Sign in</h1>
+          <p className="text-sm text-slate-500">Shop groceries and get help with your orders.</p>
         </div>
-
-        <div>
-          <label className="block text-xs font-semibold text-slate-600 mb-1">Password</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-        </div>
-
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl shadow-md transition-all text-sm"
-        >
-          {submitting ? 'Signing in…' : 'Sign In'}
+        {error && <p className="text-sm text-red-600 bg-red-50 rounded-lg p-2">{error}</p>}
+        {info && <p className="text-sm text-emerald-700 bg-emerald-50 rounded-lg p-2">{info}</p>}
+        <label className="block text-sm">
+          <span className="text-slate-700">Email</span>
+          <input type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </label>
+        <label className="block text-sm">
+          <span className="text-slate-700">Password</span>
+          <input type="password" required autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2" />
+        </label>
+        <button disabled={busy} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg py-2.5 font-medium disabled:opacity-60">
+          {busy ? 'Signing in…' : 'Sign in'}
         </button>
-        {error && <p role="alert" className="text-sm text-rose-600">{error}</p>}
+        <div className="flex justify-between text-sm">
+          <button type="button" onClick={forgot} className="text-slate-500 hover:text-slate-800">Forgot password?</button>
+          <Link href="/register" className="text-emerald-700 font-medium">Create account</Link>
+        </div>
       </form>
-      <p className="text-center text-xs text-slate-500">New customer? <a className="font-semibold text-emerald-700 hover:underline" href="/register">Create an account</a></p>
     </div>
   );
 }

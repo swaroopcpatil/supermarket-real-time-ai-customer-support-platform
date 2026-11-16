@@ -1,39 +1,49 @@
-import React from 'react';
-import { User, Shield, CreditCard, MapPin } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { getSupabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth';
 
-export default function ProfilePage() {
+export default function Profile() {
+  const { profile, refreshProfile } = useAuth();
+  const [form, setForm] = useState({ full_name: '', phone: '', default_address: '' });
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    if (profile) setForm({ full_name: profile.full_name || '', phone: profile.phone || '', default_address: profile.default_address || '' });
+  }, [profile]);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (!profile) return;
+    const { error } = await getSupabase()
+      .from('profiles')
+      .update({ full_name: form.full_name.trim(), phone: form.phone.trim() || null, default_address: form.default_address.trim() || null })
+      .eq('id', profile.id);
+    setStatus(error ? error.message : 'Saved.');
+    if (!error) refreshProfile();
+  }
+
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
-        <div className="w-16 h-16 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-bold text-2xl">
-          RS
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">Rahul Sharma</h2>
-          <p className="text-xs text-slate-500">customer@supermarket.com • ID: CUS-DEMO</p>
-          <span className="inline-block mt-2 text-[10px] font-bold bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full">
-            SMART SAVER MEMBER
-          </span>
-        </div>
+    <form onSubmit={save} className="max-w-lg mx-auto bg-white border border-slate-200 rounded-2xl p-6 space-y-4">
+      <div>
+        <p className="text-sm text-slate-500">Signed in as</p>
+        <p className="font-semibold text-slate-800">{profile?.email}</p>
       </div>
-
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-        <h3 className="font-bold text-slate-800 text-sm">Account Details</h3>
-        <div className="space-y-3 text-xs">
-          <div className="flex justify-between py-2 border-b border-slate-100">
-            <span className="text-slate-500">Primary Phone</span>
-            <span className="font-semibold text-slate-800">+91-9876543210</span>
-          </div>
-          <div className="flex justify-between py-2 border-b border-slate-100">
-            <span className="text-slate-500">Default Delivery Address</span>
-            <span className="font-semibold text-slate-800">21 Lake View Road, Indiranagar, Bengaluru</span>
-          </div>
-          <div className="flex justify-between py-2 border-b border-slate-100">
-            <span className="text-slate-500">Supermarket Wallet Balance</span>
-            <span className="font-bold text-emerald-600">₹250.00</span>
-          </div>
-        </div>
+      <label className="block text-sm">
+        <span className="text-slate-700">Full name</span>
+        <input value={form.full_name} onChange={(e) => setForm({ ...form, full_name: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2" />
+      </label>
+      <label className="block text-sm">
+        <span className="text-slate-700">Mobile number</span>
+        <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2" />
+      </label>
+      <label className="block text-sm">
+        <span className="text-slate-700">Default delivery address</span>
+        <textarea rows={3} value={form.default_address} onChange={(e) => setForm({ ...form, default_address: e.target.value })} className="mt-1 w-full border border-slate-300 rounded-lg px-3 py-2" />
+      </label>
+      <div className="flex items-center gap-3">
+        <button className="bg-emerald-600 text-white rounded-lg px-4 py-2 text-sm">Save</button>
+        {status && <span className="text-sm text-slate-600">{status}</span>}
       </div>
-    </div>
+    </form>
   );
 }

@@ -11,3 +11,7 @@ prometheus-data/
 grafana-data/
 compose-start.log
 compose-start.err
+.env.local
+.env*.local
+.vercel
+*.tsbuildinfo

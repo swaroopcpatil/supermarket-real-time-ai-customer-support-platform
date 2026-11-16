@@ -1,68 +1,90 @@
-import React, { useState, useEffect } from 'react';
-import { Ticket as TicketIcon, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Plus } from 'lucide-react';
+import { getSupabase } from '@/lib/supabase';
+import { useAuth } from '@/lib/auth';
+import StatusBadge from '@/components/StatusBadge';
+import type { Ticket } from '@/lib/types';
 
-interface TicketItem {
-  id: string;
-  customer_id: string;
-  category: string;
-  priority: string;
-  description: string;
-  status: string;
-  created_at: string;
-}
+const CATEGORIES = ['GENERAL', 'ORDER', 'REFUND', 'PRODUCT', 'DELIVERY', 'PAYMENT', 'COMPLAINT'];
 
-export default function TicketsPage() {
-  const [tickets, setTickets] = useState<TicketItem[]>([]);
+export default function Tickets() {
+  const { session } = useAuth();
+  const userId = session?.user.id;
+  const [tickets, setTickets] = useState<Ticket[]>([]);
   const [loading, setLoading] = useState(true);
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ subject: '', description: '', category: 'GENERAL' });
+  const [error, setError] = useState('');
+
+  const load = useCallback(async () => {
+    if (!userId) return;
+    const { data } = await getSupabase().from('tickets').select('*').eq('customer_id', userId).order('created_at', { ascending: false });
+    setTickets((data as Ticket[]) || []);
+    setLoading(false);
+  }, [userId]);
 
   useEffect(() => {
-    fetchTickets();
-  }, []);
+    if (!userId) return;
+    load();
+    const supabase = getSupabase();
+    const channel = supabase
+      .channel(`tickets:${userId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'tickets', filter: `customer_id=eq.${userId}` }, () => load())
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId, load]);
 
-  const fetchTickets = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/tickets?customer_id=CUS-DEMO');
-      if (res.ok) {
-        const data = await res.json();
-        setTickets(data);
-      }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
+  async function create(e: React.FormEvent) {
+    e.preventDefault();
+    setError('');
+    const { error } = await getSupabase().from('tickets').insert({ customer_id: userId, ...form, priority: 'MEDIUM' });
+    if (error) setError(error.message);
+    else {
+      setForm({ subject: '', description: '', category: 'GENERAL' });
+      setOpen(false);
+      load();
     }
-  };
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-        <h1 className="text-xl font-bold text-slate-800">Support Tickets & Human Escalations</h1>
-        <p className="text-xs text-slate-500 mt-1">Track AI-escalated tickets and human agent responses</p>
+    <div className="max-w-4xl mx-auto space-y-4">
+      <div className="flex justify-between items-center">
+        <p className="text-sm text-slate-500">Tickets are answered by our support team. You get a notification when they reply.</p>
+        <button onClick={() => setOpen((o) => !o)} className="flex items-center gap-1 text-sm bg-emerald-600 text-white rounded-lg px-3 py-2"><Plus className="w-4 h-4" /> New ticket</button>
       </div>
 
+      {open && (
+        <form onSubmit={create} className="bg-white border border-slate-200 rounded-2xl p-4 space-y-3">
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <input required maxLength={200} value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} placeholder="Subject" className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm">
+            {CATEGORIES.map((c) => <option key={c} value={c}>{c.charAt(0) + c.slice(1).toLowerCase()}</option>)}
+          </select>
+          <textarea required maxLength={4000} rows={4} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Describe the problem. Include your order number if it is about an order." className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm" />
+          <button className="text-sm bg-slate-900 text-white rounded-lg px-4 py-2">Submit ticket</button>
+        </form>
+      )}
+
       {loading ? (
-        <div className="text-center py-12 text-slate-400 font-medium">Loading support tickets...</div>
+        <p className="text-sm text-slate-500">Loading tickets…</p>
+      ) : tickets.length === 0 ? (
+        <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center text-slate-600">No support tickets yet.</div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {tickets.map((t) => (
-            <div key={t.id} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="font-extrabold text-slate-900 font-mono text-sm">{t.id}</span>
-                <span className={`text-xs px-2.5 py-1 rounded-full font-bold ${
-                  t.status === 'OPEN' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-                }`}>
-                  {t.status}
-                </span>
+        tickets.map((t) => (
+          <div key={t.id} className="bg-white border border-slate-200 rounded-2xl p-4">
+            <div className="flex flex-wrap justify-between gap-2">
+              <div>
+                <p className="font-semibold text-slate-800">{t.subject}</p>
+                <p className="text-xs text-slate-500">{t.ticket_number} · {t.category.toLowerCase()} · {new Date(t.created_at).toLocaleString('en-IN')}</p>
               </div>
-              <p className="text-sm text-slate-700 leading-relaxed">{t.description}</p>
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-400">
-                <span>Category: <strong className="text-slate-600">{t.category}</strong></span>
-                <span>Priority: <strong className="text-slate-800">{t.priority}</strong></span>
-              </div>
+              <div className="flex gap-2 items-start"><StatusBadge value={t.priority} /><StatusBadge value={t.status} /></div>
             </div>
-          ))}
-        </div>
+            <p className="text-sm text-slate-600 mt-2 whitespace-pre-wrap">{t.description}</p>
+            {t.resolution && <p className="text-sm mt-3 bg-emerald-50 text-emerald-800 rounded-lg p-3"><strong>Support team:</strong> {t.resolution}</p>}
+          </div>
+        ))
       )}
     </div>
   );
