@@ -147,12 +147,12 @@ end;
 $$;
 revoke all on function catalog_import.import_india_pages(int, int, int) from public, anon, authenticated;
 
--- Background runner: a pg_cron job imports one page every 20 seconds and
+-- Background runner: a pg_cron job imports one page every 2 minutes and
 -- unschedules itself when catalog_import.progress.last_page is reached.
 -- Start an import of pages 1-60 (about 6,000 products):
 --   insert into catalog_import.progress (id, next_page, last_page) values (1, 1, 60)
 --     on conflict (id) do update set next_page = 1, last_page = 60, log = '';
---   select cron.schedule('off-india-import', '20 seconds', 'select catalog_import.run_next_batch()');
+--   select cron.schedule('off-india-import', '*/2 * * * *', 'select catalog_import.run_next_batch()');
 create extension if not exists pg_cron;
 
 create table if not exists catalog_import.progress (
@@ -165,7 +165,7 @@ create table if not exists catalog_import.progress (
 );
 revoke all on catalog_import.progress from public, anon, authenticated;
 
--- One page per run keeps each run short and under Open Food Facts' rate limit.
+-- One page per run keeps each run short and well under Open Food Facts' rate limit.
 create or replace function catalog_import.run_next_batch()
 returns void
 language plpgsql
@@ -188,11 +188,13 @@ begin
        set next_page = next_page + 1, failures = 0, log = log || st.next_page || ':' || n || ' ', updated_at = now()
      where id = 1;
   exception when others then
-    -- Retry the same page next run; give up on it after 5 tries.
+    -- Open Food Facts outages and rate limits are temporary: keep the same
+    -- page and try again on the next run. Only after 30 consecutive failures
+    -- (an hour at the 2-minute schedule) skip the page and reset the counter.
     update catalog_import.progress
-       set failures = failures + 1,
-           next_page = case when failures + 1 >= 5 then next_page + 1 else next_page end,
-           log = log || case when failures + 1 >= 5 then st.next_page || ':skipped ' else '' end,
+       set failures = case when failures + 1 >= 30 then 0 else failures + 1 end,
+           next_page = case when failures + 1 >= 30 then next_page + 1 else next_page end,
+           log = log || case when failures + 1 >= 30 then st.next_page || ':skipped ' else '' end,
            updated_at = now()
      where id = 1;
   end;

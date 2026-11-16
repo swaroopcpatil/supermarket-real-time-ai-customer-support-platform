@@ -86,7 +86,7 @@ After that, admins can promote staff from **Store Admin → Settings → Team**.
 ```sql
 insert into catalog_import.progress (id, next_page, last_page) values (1, 1, 60)
   on conflict (id) do update set next_page = 1, last_page = 60, failures = 0, log = '';
-select cron.schedule('off-india-import', '20 seconds', 'select catalog_import.run_next_batch()');
+select cron.schedule('off-india-import', '*/2 * * * *', 'select catalog_import.run_next_batch()');
 ```
 
 The job removes itself when finished. Check progress with `select next_page, log from catalog_import.progress;`. Re-running is safe: products are matched by barcode, and your MRP, price, stock and visibility are never overwritten.
