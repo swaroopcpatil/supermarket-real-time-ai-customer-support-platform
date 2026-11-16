@@ -202,7 +202,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       let message = `The assistant is temporarily unavailable. Please try again in a moment.${handOff}`;
       if (err instanceof ApiError) {
         console.error('[chat] Gemini API error', err.status, err.message);
-        if (err.status === 429) message = 'The assistant is busy right now. Please try again in a minute.';  // quota or rate limit; also visible in /api/health
+        if (err.status === 429) {
+          // A per-minute limit clears quickly; a daily quota does not, so don't promise a quick retry.
+          const daily = /PerDay|per day/i.test(err.message);
+          message = daily ? `The assistant is offline right now.${handOff}` : 'The assistant is busy right now. Please try again in a minute.';
+        }
         else if (err.status === 400 || err.status === 401 || err.status === 403) message = `The assistant is offline right now.${handOff}`;
       } else {
         console.error('[chat] unexpected error', err);
