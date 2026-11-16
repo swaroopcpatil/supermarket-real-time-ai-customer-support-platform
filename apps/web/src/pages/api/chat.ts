@@ -30,13 +30,13 @@ const FUNCTION_DECLARATIONS = TOOLS.map((t) => ({
 
 type StreamParams = Parameters<GoogleGenAI['models']['generateContentStream']>[0];
 
-/** Open the response stream, retrying Google's temporary overload (429/500/503) a few times. */
+/** Open the response stream, retrying Google's temporary overload (500/503) a few times. A 429 is a quota limit and is reported instead. */
 async function openStream(params: StreamParams, signal: AbortSignal) {
   for (let attempt = 1; ; attempt++) {
     try {
       return await client().models.generateContentStream(params);
     } catch (err) {
-      const retryable = err instanceof ApiError && [429, 500, 503].includes(err.status);
+      const retryable = err instanceof ApiError && [500, 503].includes(err.status);
       if (!retryable || attempt >= 3 || signal.aborted) throw err;
       await new Promise((r) => setTimeout(r, 800 * attempt));
     }

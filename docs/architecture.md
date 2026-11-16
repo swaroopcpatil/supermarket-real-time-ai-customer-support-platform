@@ -42,7 +42,7 @@ Triggers write a `notifications` row on every order, refund and ticket change. T
 
 ## AI assistant
 
-- Model `gemini-3.5-flash` (configurable with `GEMINI_MODEL`) through the Google Gen AI SDK, streamed to the browser over SSE. Temporary Google overload (429/500/503) is retried before a response starts.
+- Model `gemini-3.5-flash` (configurable with `GEMINI_MODEL`) through the Google Gen AI SDK, streamed to the browser over SSE. Temporary Google overload (500/503) is retried before a response starts; quota errors (429) are reported, not retried.
 - The system prompt and live store settings go in the system instruction; the model's thought signatures are passed back unchanged between tool rounds.
 - Tools (function declarations): `search_products`, `get_my_orders`, `get_order_details`, `cancel_order`, `request_refund`, `search_policies`, `create_support_ticket`, `get_my_tickets`. Tool definitions are provider-neutral JSON Schema in `src/lib/agent.ts`.
 - Conversations and the assistant's tool activity are stored in `chat_messages`. Staff see the transcript on any ticket the assistant opened.
