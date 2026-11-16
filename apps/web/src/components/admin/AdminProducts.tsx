@@ -44,7 +44,7 @@ function ProductRow({ p, onSaved }: { p: Product; onSaved: () => void }) {
       .from('products')
       .update({ price: num(price), mrp: num(mrp), stock_quantity: Math.max(0, Math.floor(num(stock) ?? 0)) })
       .eq('id', p.id);
-    setState(error ? error.message : 'Saved');
+    setState(error ? (error.message.includes('price_not_above_mrp') ? 'Price cannot be above MRP' : error.message) : 'Saved');
     if (!error) onSaved();
   }
 
@@ -83,9 +83,15 @@ function ProductRow({ p, onSaved }: { p: Product; onSaved: () => void }) {
   );
 }
 
+const PAGE_SIZE = 50;
+
 export default function AdminProducts() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [total, setTotal] = useState(0);
+  const [counts, setCounts] = useState({ all: 0, unpriced: 0, low: 0 });
+  const [page, setPage] = useState(0);
   const [filter, setFilter] = useState('');
+  const [debounced, setDebounced] = useState('');
   const [view, setView] = useState<'all' | 'unpriced' | 'low'>('all');
   const [importMsg, setImportMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -94,10 +100,35 @@ export default function AdminProducts() {
   const [hits, setHits] = useState<SearchHit[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(filter.trim()), 300);
+    return () => clearTimeout(t);
+  }, [filter]);
+
+  useEffect(() => {
+    setPage(0);
+  }, [debounced, view]);
+
+  // Server-side filtering and paging: the catalogue can hold many thousands of products.
   const load = useCallback(async () => {
-    const { data } = await getSupabase().from('products').select('*').order('name').limit(2000);
+    const supabase = getSupabase();
+    let q = supabase.from('products').select('*', { count: 'exact' }).order('name').range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+    const term = debounced.replace(/[%,()*\\]/g, ' ').trim();
+    if (term) q = q.or(`name.ilike.%${term}%,brand.ilike.%${term}%,barcode.ilike.%${term}%,category.ilike.%${term}%`);
+    if (view === 'unpriced') q = q.is('price', null);
+    if (view === 'low') q = q.not('price', 'is', null).lte('stock_quantity', 5);
+    const { data, count } = await q;
     setProducts((data as Product[]) || []);
-  }, []);
+    setTotal(count ?? 0);
+
+    const head = { count: 'exact' as const, head: true };
+    const [all, unpriced, low] = await Promise.all([
+      supabase.from('products').select('id', head),
+      supabase.from('products').select('id', head).is('price', null),
+      supabase.from('products').select('id', head).not('price', 'is', null).lte('stock_quantity', 5),
+    ]);
+    setCounts({ all: all.count ?? 0, unpriced: unpriced.count ?? 0, low: low.count ?? 0 });
+  }, [page, debounced, view]);
 
   useEffect(() => {
     load();
@@ -171,13 +202,8 @@ export default function AdminProducts() {
     }
   }
 
-  const visible = products.filter((p) => {
-    const q = filter.trim().toLowerCase();
-    if (q && !`${p.name} ${p.brand ?? ''} ${p.barcode ?? ''} ${p.category}`.toLowerCase().includes(q)) return false;
-    if (view === 'unpriced') return p.price === null;
-    if (view === 'low') return p.price !== null && p.stock_quantity <= 5;
-    return true;
-  });
+  const visible = products;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   return (
     <div className="space-y-5">
@@ -254,12 +280,17 @@ export default function AdminProducts() {
 
       <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
         <div className="p-3 flex flex-wrap gap-2 items-center border-b border-slate-100">
-          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Filter catalogue" className="text-sm border border-slate-300 rounded-lg px-3 py-1.5" />
+          <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Search name, brand, barcode, aisle" className="text-sm border border-slate-300 rounded-lg px-3 py-1.5 min-w-[220px]" />
           {(['all', 'unpriced', 'low'] as const).map((v) => (
             <button key={v} onClick={() => setView(v)} className={`text-xs px-3 py-1.5 rounded-full border ${view === v ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-300'}`}>
-              {v === 'all' ? `All (${products.length})` : v === 'unpriced' ? `Needs price (${products.filter((p) => p.price === null).length})` : 'Low stock'}
+              {v === 'all' ? `All (${counts.all})` : v === 'unpriced' ? `Needs price (${counts.unpriced})` : `Low stock (${counts.low})`}
             </button>
           ))}
+          <div className="ml-auto flex items-center gap-2 text-xs text-slate-600">
+            <button disabled={page === 0} onClick={() => setPage((p) => p - 1)} className="px-2 py-1 border border-slate-300 rounded disabled:opacity-40">Prev</button>
+            <span>Page {page + 1} of {pages} · {total} products</span>
+            <button disabled={page + 1 >= pages} onClick={() => setPage((p) => p + 1)} className="px-2 py-1 border border-slate-300 rounded disabled:opacity-40">Next</button>
+          </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-left">
@@ -272,7 +303,7 @@ export default function AdminProducts() {
           </table>
           {visible.length === 0 && <p className="p-6 text-sm text-slate-500">No products.</p>}
         </div>
-        <p className="p-3 text-[11px] text-slate-400">Customers only see products that are visible and priced; out-of-stock items show as unavailable. Price changes reach shoppers instantly. Example: {formatINR(58)}.</p>
+        <p className="p-3 text-[11px] text-slate-400">Enter the MRP printed on the pack and your selling price (it can't be above MRP — the database rejects that). Customers only see products that are visible and priced; price changes reach shoppers instantly, e.g. {formatINR(58)} against an MRP of {formatINR(60)} shows a discount.</p>
       </div>
     </div>
   );

@@ -1,42 +1,81 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Check, Package, Search, ShoppingCart } from 'lucide-react';
 import { getSupabase } from '@/lib/supabase';
 import { useCart } from '@/lib/cart';
 import { formatINR, type Product } from '@/lib/types';
 
+const PAGE_SIZE = 48;
+
 export default function Products() {
   const cart = useCart();
   const [products, setProducts] = useState<Product[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState('');
+  const [debounced, setDebounced] = useState('');
   const [category, setCategory] = useState('All');
+  const [categories, setCategories] = useState<string[]>(['All']);
   const [added, setAdded] = useState<string | null>(null);
 
   useEffect(() => {
-    const supabase = getSupabase();
-    supabase
-      .from('products')
-      .select('*')
-      .eq('is_active', true)
-      .not('price', 'is', null)
-      .order('name')
-      .limit(1000)
-      .then(({ data }) => {
-        setProducts((data as Product[]) || []);
-        setLoading(false);
-      });
+    const t = setTimeout(() => setDebounced(query.trim()), 300);
+    return () => clearTimeout(t);
+  }, [query]);
 
-    // Live price and stock updates from the store.
+  useEffect(() => {
+    getSupabase()
+      .rpc('product_categories', { p_include_unpriced: false })
+      .then(({ data }) => setCategories(['All', ...((data as { category: string }[]) || []).map((c) => c.category)]));
+  }, []);
+
+  // Search, filter and page on the server so the full catalogue stays reachable.
+  const fetchPage = useCallback(
+    async (offset: number) => {
+      let q = getSupabase()
+        .from('products')
+        .select('*', { count: 'exact' })
+        .eq('is_active', true)
+        .not('price', 'is', null)
+        .order('name')
+        .range(offset, offset + PAGE_SIZE - 1);
+      const words = debounced.replace(/[%,()*\\]/g, ' ').split(/\s+/).filter(Boolean).slice(0, 4);
+      for (const w of words) q = q.or(`name.ilike.%${w}%,brand.ilike.%${w}%`);
+      if (category !== 'All') q = q.eq('category', category);
+      const { data, count } = await q;
+      return { rows: (data as Product[]) || [], count: count ?? 0 };
+    },
+    [debounced, category],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetchPage(0).then(({ rows, count }) => {
+      if (cancelled) return;
+      setProducts(rows);
+      setTotal(count);
+      setLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPage]);
+
+  async function loadMore() {
+    const { rows } = await fetchPage(products.length);
+    setProducts((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.id === r.id))]);
+  }
+
+  // Live price and stock updates for the products on screen.
+  useEffect(() => {
+    const supabase = getSupabase();
     const channel = supabase
       .channel('products-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
-        setProducts((prev) => {
-          if (payload.eventType === 'DELETE') return prev.filter((p) => p.id !== (payload.old as Product).id);
-          const p = payload.new as Product;
-          const visible = p.is_active && p.price !== null;
-          const rest = prev.filter((x) => x.id !== p.id);
-          return visible ? [...rest, p].sort((a, b) => a.name.localeCompare(b.name)) : rest;
-        });
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
+        const p = payload.new as Product;
+        setProducts((prev) =>
+          prev.flatMap((x) => (x.id !== p.id ? [x] : p.is_active && p.price !== null ? [{ ...x, ...p }] : [])),
+        );
       })
       .subscribe();
     return () => {
@@ -44,12 +83,7 @@ export default function Products() {
     };
   }, []);
 
-  const categories = useMemo(() => ['All', ...Array.from(new Set(products.map((p) => p.category))).sort()], [products]);
-  const filtered = products.filter((p) => {
-    const q = query.trim().toLowerCase();
-    const matchesQuery = !q || `${p.name} ${p.brand ?? ''} ${p.category}`.toLowerCase().includes(q);
-    return matchesQuery && (category === 'All' || p.category === category);
-  });
+  const filtered = products;
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
@@ -68,7 +102,7 @@ export default function Products() {
       ) : filtered.length === 0 ? (
         <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center">
           <Package className="w-10 h-10 text-slate-300 mx-auto" />
-          <p className="mt-3 text-slate-600">{products.length === 0 ? 'The store has not published any products yet.' : 'No products match your search.'}</p>
+          <p className="mt-3 text-slate-600">{!debounced && category === 'All' ? 'The store has not published any products yet.' : 'No products match your search.'}</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
@@ -112,6 +146,13 @@ export default function Products() {
               </div>
             );
           })}
+        </div>
+      )}
+      {!loading && products.length < total && (
+        <div className="text-center">
+          <button onClick={loadMore} className="text-sm border border-slate-300 bg-white rounded-xl px-5 py-2 hover:border-emerald-400">
+            Show more ({total - products.length} more)
+          </button>
         </div>
       )}
       <p className="text-[11px] text-slate-400 text-center">Product information and images from Open Food Facts (openfoodfacts.org), available under the Open Database License.</p>

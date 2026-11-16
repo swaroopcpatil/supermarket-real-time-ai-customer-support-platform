@@ -139,7 +139,10 @@ export async function fetchManyByBarcode(barcodes: string[], concurrency = 5): P
 export async function searchProducts(query: string, pageSize = 24): Promise<OffProduct[]> {
   const q = query.trim();
   if (!q) return [];
+  // The classic CGI search is the most reliable public endpoint; the newer
+  // ones are tried as fallbacks.
   const attempts = [
+    `https://world.openfoodfacts.org/cgi/search.pl?action=process&json=1&sort_by=unique_scans_n&search_terms=${encodeURIComponent(q)}&tagtype_0=countries&tag_contains_0=contains&tag_0=india&page_size=${pageSize}&fields=${PRODUCT_FIELDS}`,
     `https://search.openfoodfacts.org/search?q=${encodeURIComponent(`${q} countries_tags:"en:india"`)}&page_size=${pageSize}&fields=${PRODUCT_FIELDS}`,
     `https://world.openfoodfacts.org/api/v2/search?search_terms=${encodeURIComponent(q)}&countries_tags_en=india&page_size=${pageSize}&fields=${PRODUCT_FIELDS}`,
   ];

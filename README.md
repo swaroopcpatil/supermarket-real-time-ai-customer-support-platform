@@ -77,7 +77,21 @@ After that, admins can promote staff from **Store Admin → Settings → Team**.
 
 1. **Settings**: store name, support phone/email, hours, delivery fee, free-delivery threshold, refund window.
 2. **Policies**: edit the starter policies so they match your real rules. The assistant answers policy questions only from these.
-3. **Products**: upload a CSV from your billing/POS system (`barcode,price,mrp,stock`), scan barcodes, or search Open Food Facts. Names, brands, images and ingredients are filled in automatically. Products appear in the shop once they have a price.
+3. **Products**: upload a CSV from your billing/POS system (`barcode,price,mrp,stock`), scan barcodes, or search Open Food Facts. Names, brands, images and ingredients are filled in automatically. Products appear in the shop once they have a price. The database rejects a selling price above MRP, because selling above the printed MRP is illegal in India.
+
+### Bulk catalogue import (5,000+ Indian products)
+
+`supabase/migrations/20261116000005_off_bulk_import.sql` adds a background importer that pulls the most-scanned Indian products from Open Food Facts, 100 per page. It runs inside Postgres via `pg_cron` and the `http` extension. To import pages 1–60 (about 6,000 products), run this in the SQL editor:
+
+```sql
+insert into catalog_import.progress (id, next_page, last_page) values (1, 1, 60)
+  on conflict (id) do update set next_page = 1, last_page = 60, failures = 0, log = '';
+select cron.schedule('off-india-import', '20 seconds', 'select catalog_import.run_next_batch()');
+```
+
+The job removes itself when finished. Check progress with `select next_page, log from catalog_import.progress;`. Re-running is safe: products are matched by barcode, and your MRP, price, stock and visibility are never overwritten.
+
+MRP is not imported. Open Food Facts doesn't publish it, and retailer sites (DMart, Blinkit, etc.) may not be scraped. Enter MRP from the pack or your POS export.
 
 ## Local development
 
